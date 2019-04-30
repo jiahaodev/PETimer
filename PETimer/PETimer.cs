@@ -4,6 +4,7 @@
 	邮箱: 1785275942@qq.com
 	日期：2019/01/24 8:26   	
 	功能：计时器
+    https://github.com/PlaneZhong/PETimer
 *****************************************************/
 
 using System;
@@ -11,15 +12,16 @@ using System.Collections.Generic;
 using System.Timers;
 
 public class PETimer {
-    private Action<string> taskLog;
-    private Action<Action<int>, int> taskHandle;
+    private Action<string> taskLog;  //日志输出的一个委托
+    private Action<Action<int>, int> taskHandle; //taskHandle，当定时任务的回调处理可通过设置处理Handle来覆盖默认的执行处理
+
     private static readonly string lockTid = "lockTid";
     private DateTime startDateTime = new DateTime(1970, 1, 1, 0, 0, 0, 0);
     private double nowTime;
     private Timer srvTimer;
     private int tid;
-    private List<int> tidLst = new List<int>();
-    private List<int> recTidLst = new List<int>();
+    private List<int> tidLst = new List<int>();    //全局tid 任务列表
+    private List<int> recTidLst = new List<int>(); //即将回收的tid列表
 
     private static readonly string lockTime = "lockTime";
     private List<PETimeTask> tmpTimeLst = new List<PETimeTask>();
@@ -33,6 +35,7 @@ public class PETimer {
     private List<PEFrameTask> taskFrameLst = new List<PEFrameTask>();
     private List<int> tmpDelFrameLst = new List<int>();
 
+    //interval :在PETimer实例化时，传入检测间隔参数（单位毫秒）
     public PETimer(int interval = 0) {
         tidLst.Clear();
         recTidLst.Clear();
@@ -43,6 +46,7 @@ public class PETimer {
         tmpFrameLst.Clear();
         taskFrameLst.Clear();
 
+        //启动服务器计时器。处理服务器存在多个计时任务的情况，做独立线程处理的优化
         if (interval != 0) {
             srvTimer = new Timer(interval) {
                 AutoReset = true
@@ -56,15 +60,15 @@ public class PETimer {
     }
 
     public void Update() {
-        CheckTimeTask();
-        CheckFrameTask();
+        CheckTimeTask();   //检测 并 执行 时间任务
+        CheckFrameTask();  //检测 并 执行 帧任务
 
-        DelTimeTask();
-        DelFrameTask();
+        DelTimeTask();     //通过接口删除的时间任务，从task / tmp列表中将其移除    public void DeleteTimeTask(int tid) 
+        DelFrameTask();    //删除帧任务
 
-        if (recTidLst.Count > 0) {
+        if (recTidLst.Count > 0) {  //清理全局tid列表
             lock (lockTid) {
-                RecycleTid();
+                RecycleTid();//将已完成的任务，从全局tid列表中移除
             }
         }
     }
@@ -136,6 +140,7 @@ public class PETimer {
         if (tmpTimeLst.Count > 0) {
             lock (lockTime) {
                 //加入缓存区中的定时任务
+                //将缓存中的数据  转移到 任务列表中， 并清空缓存区
                 for (int tmpIndex = 0; tmpIndex < tmpTimeLst.Count; tmpIndex++) {
                     taskTimeLst.Add(tmpTimeLst[tmpIndex]);
                 }
@@ -144,7 +149,7 @@ public class PETimer {
         }
 
         //遍历检测任务是否达到条件
-        nowTime = GetUTCMilliseconds();
+        nowTime = GetUTCMilliseconds(); //【时间任务是否执行的标准】
         for (int index = 0; index < taskTimeLst.Count; index++) {
             PETimeTask task = taskTimeLst[index];
             if (nowTime.CompareTo(task.destTime) < 0) {
@@ -170,7 +175,7 @@ public class PETimer {
                 if (task.count == 1) {
                     taskTimeLst.RemoveAt(index);
                     index--;
-                    recTidLst.Add(task.tid);
+                    recTidLst.Add(task.tid); //添加到回收tid列表，等待自动移除全局任务id记录
                 }
                 else {
                     if (task.count != 0) {
@@ -192,7 +197,7 @@ public class PETimer {
             }
         }
 
-        frameCounter += 1;
+        frameCounter += 1;    //【帧任务是否执行的标准】
         //遍历检测任务是否达到条件
         for (int index = 0; index < taskFrameLst.Count; index++) {
             PEFrameTask task = taskFrameLst[index];
@@ -302,6 +307,9 @@ public class PETimer {
          return exist;
          */
     }
+
+    //替换接口，相对于Add接口，需要传旧的 tid 
+    //仅当旧的tid存在时，才执行替换逻辑
     public bool ReplaceTimeTask(int tid, Action<int> callback, float delay, PETimeUnit timeUnit = PETimeUnit.Millisecond, int count = 1) {
         if (timeUnit != PETimeUnit.Millisecond) {
             switch (timeUnit) {
@@ -472,6 +480,7 @@ public class PETimer {
     }
 
     #region Tool Methonds
+    //分配全局的 任务 id
     private int GetTid() {
         lock (lockTid) {
             tid += 1;
@@ -501,6 +510,8 @@ public class PETimer {
 
         return tid;
     }
+
+    //根据回收列表，将tid列表中，对应的任务移除
     private void RecycleTid() {
         for (int i = 0; i < recTidLst.Count; i++) {
             int tid = recTidLst[i];
